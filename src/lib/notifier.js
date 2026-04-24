@@ -38,9 +38,26 @@ function siteNotificationFile(config, siteKey) {
   return path.join(config.dataDir, `notifications-${siteKey}.json`);
 }
 
+function isAutoAddCartUrl(url) {
+  return /\/panier\/#\/addExamination\//i.test(String(url || ''));
+}
+
+function getEmailTargets(change) {
+  const course = change.course;
+  const courseUrl = course.url || '';
+  const registrationUrl = change.registrationUrl || courseUrl;
+  const isAutoAddCart = isAutoAddCartUrl(courseUrl);
+
+  return {
+    primaryUrl: isAutoAddCart ? registrationUrl : (courseUrl || registrationUrl),
+    directCartUrl: isAutoAddCart ? courseUrl : '',
+    isAutoAddCart
+  };
+}
+
 function buildHtml(change) {
   const course = change.course;
-  const targetUrl = course.url || change.registrationUrl;
+  const targets = getEmailTargets(change);
   const rows = [
     ['考场', change.siteName],
     ['课程', course.name],
@@ -59,6 +76,17 @@ function buildHtml(change) {
       </tr>`)
     .join('');
 
+  const cartWarning = targets.isAutoAddCart
+    ? `
+      <p style="font-size:14px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:12px 14px;border-radius:6px;margin:18px 0;">
+        Montreal 的直接报名链接会复用当前浏览器购物车。如果购物车里已有旧场次，请先清空购物车，或从报名页重新选择本邮件中的日期。
+      </p>
+      <p style="font-size:14px;margin:12px 0;">
+        直接加入购物车链接：<br>
+        <a href="${escapeHtml(targets.directCartUrl)}" style="color:#d6002a;">${escapeHtml(targets.directCartUrl)}</a>
+      </p>`
+    : '';
+
   return `
     <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;line-height:1.6;color:#222;max-width:680px;margin:0 auto;">
       <h1 style="font-size:24px;margin:0 0 16px;color:#d6002a;">发现新的 TCF 考位</h1>
@@ -66,19 +94,20 @@ function buildHtml(change) {
       <table style="border-collapse:collapse;width:100%;margin:16px 0;border:1px solid #eee;">
         ${detailRows}
       </table>
+      ${cartWarning}
       <p style="margin:24px 0;">
-        <a href="${escapeHtml(targetUrl)}" style="display:inline-block;background:#d6002a;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:6px;">
+        <a href="${escapeHtml(targets.primaryUrl)}" style="display:inline-block;background:#d6002a;color:#fff;text-decoration:none;font-weight:700;padding:14px 22px;border-radius:6px;">
           立即打开报名页
         </a>
       </p>
-      <p style="font-size:13px;color:#777;margin-top:20px;">如果按钮打不开，请复制这个链接到浏览器：<br>${escapeHtml(targetUrl)}</p>
+      <p style="font-size:13px;color:#777;margin-top:20px;">如果按钮打不开，请复制这个链接到浏览器：<br>${escapeHtml(targets.primaryUrl)}</p>
     </div>`;
 }
 
 function buildText(change) {
   const course = change.course;
-  const targetUrl = course.url || change.registrationUrl;
-  return [
+  const targets = getEmailTargets(change);
+  const lines = [
     '发现新的 TCF 考位',
     '',
     `考场：${change.siteName}`,
@@ -88,8 +117,18 @@ function buildText(change) {
     `状态：${course.rawStatus || course.status}`,
     `检测时间：${change.detectedAt}`,
     '',
-    `报名页：${targetUrl}`
-  ].join('\n');
+    `报名页：${targets.primaryUrl}`
+  ];
+
+  if (targets.isAutoAddCart) {
+    lines.push(
+      '',
+      '注意：Montreal 的直接报名链接会复用当前浏览器购物车。如购物车里已有旧场次，请先清空购物车，或从报名页重新选择本邮件中的日期。',
+      `直接加入购物车链接：${targets.directCartUrl}`
+    );
+  }
+
+  return lines.join('\n');
 }
 
 function isWithinDedupeWindow(config, timestamp) {
