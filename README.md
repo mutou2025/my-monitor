@@ -130,7 +130,158 @@ tail -f logs/monitor.log
 
 ## 6. 后台持续运行
 
-### 方法 A：pm2
+### 方法 A：Google Cloud 免费层 VPS（推荐）
+
+Google Cloud 免费层 `e2-micro` 建议用 `systemd` 运行，不需要额外常驻 `pm2`。推荐配置是 60 秒基准轮询、自动重启、1GB swap、进程内存限制。
+
+服务器目录示例：
+
+```bash
+/home/chenjunfengf/my-monitor
+```
+
+如果是新服务器，先安装依赖并拉代码：
+
+```bash
+sudo apt update
+sudo apt install -y git curl ca-certificates nodejs npm
+
+cd /home/chenjunfengf
+git clone https://github.com/mutou2025/my-monitor.git
+cd my-monitor
+
+npm install
+npx playwright install --with-deps chromium
+```
+
+创建 1GB swap，避免 Playwright 偶发内存峰值直接杀进程：
+
+```bash
+sudo fallocate -l 1G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+`.env` 推荐关键配置：
+
+```bash
+POLL_INTERVAL_BASE=60
+POLL_INTERVAL_JITTER=15
+PLAYWRIGHT_MODE=auto
+PLAYWRIGHT_TIMEOUT_MS=15000
+LOG_LEVEL=info
+NOTIFY_ON_FIRST_RUN=false
+```
+
+如果 Google Cloud SSH 的上传文件按钮不好用，可以在 Mac 本地把 `.env` 转成 base64 后粘贴到服务器：
+
+```bash
+cd /Users/lichen/Workspace/my-monitor
+base64 < .env | pbcopy
+```
+
+然后在服务器执行：
+
+```bash
+cd /home/chenjunfengf/my-monitor
+cat > /tmp/env.b64
+```
+
+粘贴后按 `Ctrl + D`，再执行：
+
+```bash
+base64 -d /tmp/env.b64 > .env
+chmod 600 .env
+rm /tmp/env.b64
+```
+
+先测试：
+
+```bash
+npm run test-email
+node src/index.js --once
+```
+
+创建 systemd 服务：
+
+```bash
+sudo nano /etc/systemd/system/tcf-monitor.service
+```
+
+内容：
+
+```ini
+[Unit]
+Description=TCF Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=chenjunfengf
+WorkingDirectory=/home/chenjunfengf/my-monitor
+Environment=NODE_OPTIONS=--max-old-space-size=256
+ExecStart=/usr/bin/node src/index.js
+Restart=always
+RestartSec=10
+MemoryHigh=600M
+MemoryMax=800M
+
+[Install]
+WantedBy=multi-user.target
+```
+
+启动并设置开机自启：
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable tcf-monitor
+sudo systemctl start tcf-monitor
+```
+
+常用命令：
+
+```bash
+# 查看服务状态
+systemctl status tcf-monitor
+
+# 查看实时日志
+journalctl -u tcf-monitor -f
+
+# 退出实时日志
+# Ctrl + C
+
+# 重启监控
+sudo systemctl restart tcf-monitor
+
+# 停止监控
+sudo systemctl stop tcf-monitor
+
+# 启动监控
+sudo systemctl start tcf-monitor
+
+# 查看内存和 swap
+free -h
+systemctl show tcf-monitor -p MemoryCurrent -p MemoryHigh -p MemoryMax
+
+# 查看项目日志
+tail -f /home/chenjunfengf/my-monitor/logs/monitor.log
+```
+
+更新代码后重启：
+
+```bash
+cd /home/chenjunfengf/my-monitor
+git pull
+npm install
+sudo systemctl restart tcf-monitor
+```
+
+如果日志里看到 Toronto 偶发 `HTTP 403`，通常是目标网站临时拒绝云服务器请求。程序会自动重试，不影响其他考点继续监控。
+
+### 方法 B：pm2
 
 安装 pm2：
 
@@ -170,7 +321,7 @@ pm2 startup
 
 运行 `pm2 startup` 后，终端会输出一条很长的命令。把那条命令复制出来再运行一次。
 
-### 方法 B：macOS launchd
+### 方法 C：macOS launchd
 
 新建文件：
 
