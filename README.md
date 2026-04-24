@@ -1,6 +1,6 @@
 # TCF Canada 考位监控工具
 
-这个工具会在你的 Mac 上 24 小时监控 TCF Canada 报名页面。一旦发现新的可报名考位，或者某个场次从满员变成可报名，就会用 Gmail SMTP 给 Melody 发邮件。
+这个工具可以定时监控 TCF Canada 报名页面。一旦发现新的可报名考位，或者某个场次从满员变成可报名，就会通过 Gmail SMTP 给配置的收件人发送邮件通知。
 
 当前监控 5 个页面，其中前两个是重点考点：
 
@@ -36,7 +36,7 @@ npm -v
 进入项目目录：
 
 ```bash
-cd /Users/lichen/Workspace/my-monitor
+cd /path/to/my-monitor
 ```
 
 安装依赖：
@@ -62,7 +62,7 @@ cp .env.example .env
 ```bash
 GMAIL_USER=你的Gmail@gmail.com
 GMAIL_APP_PASSWORD=你的Gmail应用专用密码
-RECIPIENT_EMAIL=chenjunfengf@gmail.com
+RECIPIENT_EMAIL=收件人邮箱@example.com
 ```
 
 其他配置可以先不改：
@@ -128,7 +128,7 @@ node src/index.js --once --dry-run
 tail -f logs/monitor.log
 ```
 
-## 6. 让它在 Mac 后台一直跑
+## 6. 后台持续运行
 
 ### 方法 A：pm2
 
@@ -175,10 +175,10 @@ pm2 startup
 新建文件：
 
 ```bash
-nano ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+nano ~/Library/LaunchAgents/com.example.tcf-monitor.plist
 ```
 
-填入下面内容。注意把 `/opt/homebrew/bin/node` 改成你机器上的 Node 路径；可以用 `which node` 查看。
+填入下面内容。注意把 `/opt/homebrew/bin/node` 改成你的 Node 路径；可以用 `which node` 查看。也要把 `/path/to/my-monitor` 改成项目所在目录。
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -187,22 +187,22 @@ nano ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
 <plist version="1.0">
 <dict>
   <key>Label</key>
-  <string>com.lichen.tcf-monitor</string>
+  <string>com.example.tcf-monitor</string>
   <key>ProgramArguments</key>
   <array>
     <string>/opt/homebrew/bin/node</string>
-    <string>/Users/lichen/Workspace/my-monitor/src/index.js</string>
+    <string>/path/to/my-monitor/src/index.js</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/lichen/Workspace/my-monitor</string>
+  <string>/path/to/my-monitor</string>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
   <key>StandardOutPath</key>
-  <string>/Users/lichen/Workspace/my-monitor/logs/launchd.out.log</string>
+  <string>/path/to/my-monitor/logs/launchd.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/lichen/Workspace/my-monitor/logs/launchd.err.log</string>
+  <string>/path/to/my-monitor/logs/launchd.err.log</string>
 </dict>
 </plist>
 ```
@@ -210,18 +210,18 @@ nano ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
 加载：
 
 ```bash
-launchctl load ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+launchctl load ~/Library/LaunchAgents/com.example.tcf-monitor.plist
 ```
 
 停止：
 
 ```bash
-launchctl unload ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+launchctl unload ~/Library/LaunchAgents/com.example.tcf-monitor.plist
 ```
 
 ## 7. 防止 Mac 睡眠打断脚本
 
-脚本必须依赖你的 Mac 一直醒着。
+如果在本机长期运行，脚本需要电脑保持唤醒状态。
 
 打开：
 
@@ -254,10 +254,10 @@ launchctl unload ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
 - 地址：24 Spadina Road, Toronto, ON
 - 监控逻辑：默认只监控官方 TCF 页面，不再依赖 `TORONTO_REGISTER_URL`。
 
-如果以后你还是想直接抓 Active Network API，可以在 `.env` 里额外填：
+如果需要直接抓 Active Network API，可以在 `.env` 里额外填：
 
 ```bash
-TORONTO_ACTIVE_API_URL=你抓到的Request URL
+TORONTO_ACTIVE_API_URL=抓到的 Request URL
 TORONTO_ACTIVE_API_METHOD=GET
 TORONTO_ACTIVE_API_BODY=
 TORONTO_ACTIVE_API_HEADERS={}
@@ -302,7 +302,7 @@ npx playwright install chromium
 停止程序后删除运行数据：
 
 ```bash
-rm data/snapshots.json data/notifications.json
+rm data/snapshot-*.json data/notifications-*.json
 ```
 
 再重新启动。这样程序会把下一次看到的可报名场次当成新考位。
