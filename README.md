@@ -1,0 +1,308 @@
+# TCF Canada 考位监控工具
+
+这个工具会在你的 Mac 上 24 小时监控 TCF Canada 报名页面。一旦发现新的可报名考位，或者某个场次从满员变成可报名，就会用 Gmail SMTP 给 Melody 发邮件。
+
+当前监控 5 个页面，其中前两个是重点考点：
+
+- Montreal 重点：Kuper Academy Kirkland / 西岛校区，2975 Edmond, Kirkland, QC H9H 5K5  
+  <https://www.kuperacademy.ca/en/academics/tcf-canada-tcfq-language-proficiency-testing.html>
+- Toronto 重点：Spadina Campus，24 Spadina Road, Toronto, ON  
+  <https://www.alliance-francaise.ca/en/exams/tests/informations-about-tcf-canada/tcf-canada>
+- Montreal: <https://www.afmontreal.ca/tcf/#/>
+- Edmonton: <https://www.afedmonton.com/en/exams/tcf/>
+- Manitoba: <https://www.afmanitoba.ca/en/exams/tcf/>
+
+## 1. 环境准备
+
+先安装 Node.js。推荐用 Homebrew：
+
+```bash
+brew install node
+```
+
+如果你没有 Homebrew，也可以去 Node.js 官网下载安装包：<https://nodejs.org/>
+
+装好后，在终端里检查：
+
+```bash
+node -v
+npm -v
+```
+
+`node -v` 建议显示 `v18.17.0` 或更高。
+
+## 2. 第一次运行
+
+进入项目目录：
+
+```bash
+cd /Users/lichen/Workspace/my-monitor
+```
+
+安装依赖：
+
+```bash
+npm install
+```
+
+如果安装 Playwright 后提示缺少浏览器，再运行：
+
+```bash
+npx playwright install chromium
+```
+
+复制配置文件：
+
+```bash
+cp .env.example .env
+```
+
+打开 `.env`，填写这几项：
+
+```bash
+GMAIL_USER=你的Gmail@gmail.com
+GMAIL_APP_PASSWORD=你的Gmail应用专用密码
+RECIPIENT_EMAIL=chenjunfengf@gmail.com
+```
+
+其他配置可以先不改：
+
+- `POLL_INTERVAL_BASE=90`：基础检查间隔，90 秒。
+- `POLL_INTERVAL_JITTER=30`：每次随机提前或延后 30 秒。
+- `NOTIFICATION_DEDUPE_WINDOW=30`：同一个考位 30 分钟内只发一次邮件。
+- `PLAYWRIGHT_MODE=auto`：Montreal 这种动态页面抓不到时，自动用浏览器渲染兜底。
+- `PLAYWRIGHT_TIMEOUT_MS=30000`：动态页面最多等 30 秒，Montreal 页面比较慢时会用到。
+
+## 3. Gmail 应用专用密码
+
+不要把 Gmail 登录密码填进 `.env`。请用 Google 的“应用专用密码”。
+
+步骤：
+
+1. 打开 <https://myaccount.google.com/security>
+2. 先确认你的 Google 账号已经开启“两步验证”。
+3. 搜索或找到“应用专用密码 / App passwords”。
+4. 应用选择 `Mail`，设备可以选 `Mac`，或者自定义名字写 `TCF Monitor`。
+5. Google 会生成一串 16 位密码，形如 `abcd efgh ijkl mnop`。
+6. 把这串密码填到 `.env` 的 `GMAIL_APP_PASSWORD=` 后面。
+
+## 4. 先测试邮件
+
+第一次不要直接跑监控，先确认邮件能发出去：
+
+```bash
+node src/index.js --test
+```
+
+测试模式不会抓网站，只会模拟“发现新考位”，立刻给收件人发一封测试邮件。
+
+如果你只想看程序会发什么邮件，但不真的发送，可以运行：
+
+```bash
+node src/index.js --test --dry-run
+```
+
+## 5. 启动监控
+
+正式启动：
+
+```bash
+node src/index.js
+```
+
+只检查一次就退出：
+
+```bash
+node src/index.js --once
+```
+
+检查网站但不发邮件：
+
+```bash
+node src/index.js --once --dry-run
+```
+
+运行后日志会同时出现在终端和文件里：
+
+```bash
+tail -f logs/monitor.log
+```
+
+## 6. 让它在 Mac 后台一直跑
+
+### 方法 A：pm2
+
+安装 pm2：
+
+```bash
+npm install -g pm2
+```
+
+启动：
+
+```bash
+pm2 start src/index.js --name tcf-monitor
+```
+
+查看状态：
+
+```bash
+pm2 status
+```
+
+查看日志：
+
+```bash
+pm2 logs tcf-monitor
+```
+
+保存当前进程列表：
+
+```bash
+pm2 save
+```
+
+设置开机自启动：
+
+```bash
+pm2 startup
+```
+
+运行 `pm2 startup` 后，终端会输出一条很长的命令。把那条命令复制出来再运行一次。
+
+### 方法 B：macOS launchd
+
+新建文件：
+
+```bash
+nano ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+```
+
+填入下面内容。注意把 `/opt/homebrew/bin/node` 改成你机器上的 Node 路径；可以用 `which node` 查看。
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lichen.tcf-monitor</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/opt/homebrew/bin/node</string>
+    <string>/Users/lichen/Workspace/my-monitor/src/index.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/lichen/Workspace/my-monitor</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>/Users/lichen/Workspace/my-monitor/logs/launchd.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/lichen/Workspace/my-monitor/logs/launchd.err.log</string>
+</dict>
+</plist>
+```
+
+加载：
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+```
+
+停止：
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.lichen.tcf-monitor.plist
+```
+
+## 7. 防止 Mac 睡眠打断脚本
+
+脚本必须依赖你的 Mac 一直醒着。
+
+打开：
+
+系统设置 → 电池 → 选项
+
+把类似下面的选项打开：
+
+- 接入电源时防止自动进入睡眠
+- 如果有“网络访问唤醒”，也打开
+
+如果你用的是台式机或外接电源的 MacBook，建议运行监控时一直插着电源。
+
+## 8. 重点考点说明
+
+### Montreal - Kuper Academy Kirkland
+
+这是重点监控考点之一。脚本会监控 Kuper Academy 的 TCF Canada / TCFQ 页面：
+
+- 页面：<https://www.kuperacademy.ca/en/academics/tcf-canada-tcfq-language-proficiency-testing.html>
+- 地址：2975 Edmond, Kirkland, Quebec, H9H 5K5
+- 监控逻辑：如果页面出现 TCF Canada / TCFQ 的日期、报名表、报名链接、可报名文字，会触发通知。
+
+这个页面目前更像说明页，不一定有结构化考位列表，所以脚本会监控页面里和 TCF 报名相关的文本变化。
+
+### Toronto - Spadina Campus
+
+这是另一个重点监控考点。
+
+- 页面：<https://www.alliance-francaise.ca/en/exams/tests/informations-about-tcf-canada/tcf-canada>
+- 地址：24 Spadina Road, Toronto, ON
+- 监控逻辑：默认只监控官方 TCF 页面，不再依赖 `TORONTO_REGISTER_URL`。
+
+如果以后你还是想直接抓 Active Network API，可以在 `.env` 里额外填：
+
+```bash
+TORONTO_ACTIVE_API_URL=你抓到的Request URL
+TORONTO_ACTIVE_API_METHOD=GET
+TORONTO_ACTIVE_API_BODY=
+TORONTO_ACTIVE_API_HEADERS={}
+```
+
+## 9. 常见问题
+
+### 邮件发不出去
+
+先运行：
+
+```bash
+node src/index.js --test
+```
+
+如果提示 `Invalid login`，通常是 Gmail 应用专用密码不对，或者 Google 账号没有开启两步验证。
+
+### 提示缺少 `.env`
+
+运行：
+
+```bash
+cp .env.example .env
+```
+
+然后打开 `.env` 填邮箱。
+
+### Montreal 抓不到截图里的“添加到购物车”
+
+Montreal 页面是动态渲染页面。程序会先试 WooCommerce API，再试 HTML，最后用 Playwright 渲染。如果日志里提示 Playwright 缺浏览器，运行：
+
+```bash
+npx playwright install chromium
+```
+
+### 网站返回 429 或 5xx
+
+程序会自动指数退避：60 秒、2 分钟、5 分钟、10 分钟。恢复正常后会回到 90 秒左右的检查间隔。
+
+### 想重新开始快照
+
+停止程序后删除运行数据：
+
+```bash
+rm data/snapshots.json data/notifications.json
+```
+
+再重新启动。这样程序会把下一次看到的可报名场次当成新考位。
