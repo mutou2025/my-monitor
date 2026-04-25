@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const { fetchWithPlaywrightFallback } = require('../lib/browser');
 const {
   absoluteUrl,
   dedupeCourses,
@@ -180,7 +181,8 @@ function parseOfficialPage(html, site) {
 async function check({ config, fetcher, logger }) {
   const site = config.sites.toronto;
   const apiCourses = await fetchActiveApiCourses(site, fetcher, config, logger);
-  const html = await fetcher.fetchText(site.url, { timeoutMs: config.requestTimeoutMs });
+  const { html } = await fetchWithPlaywrightFallback(site.url, { fetcher, config, logger, label: 'Toronto' });
+
   const pageCourses = parseOfficialPage(html, site);
   const text = normalizeWhitespace(cheerio.load(html)('body').text());
 

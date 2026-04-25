@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const { fetchWithPlaywrightFallback } = require('../lib/browser');
 const {
   dedupeCourses,
   extractReleaseNotes,
@@ -63,9 +64,9 @@ function parseCourses(html, url) {
   return dedupeCourses('edmonton', courses);
 }
 
-async function check({ config, fetcher }) {
+async function check({ config, fetcher, logger }) {
   const site = config.sites.edmonton;
-  const html = await fetcher.fetchText(site.url, { timeoutMs: config.requestTimeoutMs });
+  const { html } = await fetchWithPlaywrightFallback(site.url, { fetcher, config, logger, label: 'Edmonton' });
   const text = normalizeWhitespace(cheerio.load(html)('body').text());
 
   if (!/(tcf|edmonton|alliance)/i.test(text)) {

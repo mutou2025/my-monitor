@@ -1,4 +1,5 @@
 const cheerio = require('cheerio');
+const { fetchWithPlaywrightFallback } = require('../lib/browser');
 const {
   absoluteUrl,
   dedupeCourses,
@@ -99,9 +100,9 @@ function parseKuperPage(html, site) {
   return dedupeCourses(site.key, courses);
 }
 
-async function check({ config, fetcher }) {
+async function check({ config, fetcher, logger }) {
   const site = config.sites.kuper;
-  const html = await fetcher.fetchText(site.url, { timeoutMs: config.requestTimeoutMs });
+  const { html } = await fetchWithPlaywrightFallback(site.url, { fetcher, config, logger, label: 'Kuper' });
   const text = normalizeWhitespace(cheerio.load(html)('body').text());
 
   if (!/(tcf|kuper)/i.test(text)) {

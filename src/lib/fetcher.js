@@ -1,9 +1,9 @@
 const USER_AGENTS = [
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
+  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36',
   'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_4) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Safari/605.1.15',
-  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:125.0) Gecko/20100101 Firefox/125.0',
-  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
 ];
 
 class HttpError extends Error {
@@ -48,10 +48,25 @@ async function request(url, options = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
   const method = options.method || 'GET';
+  const ua = randomUserAgent();
+  // Extract Chrome version from UA for sec-ch-ua header
+  const chromeMatch = ua.match(/Chrome\/(\d+)/);
+  const chromeMajor = chromeMatch ? chromeMatch[1] : '125';
   const headers = {
-    'User-Agent': randomUserAgent(),
-    'Accept-Language': 'en-CA,en;q=0.9,fr-CA;q=0.8,zh-CN;q=0.7',
-    Accept: options.responseType === 'json' ? 'application/json,text/plain,*/*' : 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+    'User-Agent': ua,
+    'Accept-Language': 'en-CA,en;q=0.9,fr-CA;q=0.8,fr;q=0.7',
+    Accept: options.responseType === 'json'
+      ? 'application/json,text/plain,*/*'
+      : 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+    // Cloudflare checks these sec-ch-ua / sec-fetch-* headers to fingerprint bots
+    'sec-ch-ua': `"Chromium";v="${chromeMajor}", "Google Chrome";v="${chromeMajor}", "Not-A.Brand";v="99"`,
+    'sec-ch-ua-mobile': '?0',
+    'sec-ch-ua-platform': '"macOS"',
+    'Sec-Fetch-Dest': options.responseType === 'json' ? 'empty' : 'document',
+    'Sec-Fetch-Mode': options.responseType === 'json' ? 'cors' : 'navigate',
+    'Sec-Fetch-Site': 'none',
+    'Sec-Fetch-User': '?1',
+    'Upgrade-Insecure-Requests': '1',
     ...options.headers
   };
 
@@ -121,7 +136,8 @@ async function fetchJson(url, options = {}) {
 
 function isRateLimitOrServerError(error) {
   if (error instanceof HttpError) {
-    return error.status === 429 || error.status >= 500;
+    // 403 = Cloudflare/WAF block (common on datacenter IPs), treat as retriable
+    return error.status === 403 || error.status === 429 || error.status >= 500;
   }
   return /timeout|network|fetch failed|ECONNRESET|ENOTFOUND|EAI_AGAIN/i.test(error.message || '');
 }

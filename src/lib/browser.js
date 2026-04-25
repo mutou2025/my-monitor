@@ -1,5 +1,9 @@
 const { randomUserAgent } = require('./fetcher');
 
+/**
+ * Fetch HTML via Playwright (headless Chromium).
+ * Falls back gracefully if Playwright is not installed.
+ */
 async function fetchRenderedHtml(url, config, logger) {
   let chromium;
   try {
@@ -34,4 +38,26 @@ async function fetchRenderedHtml(url, config, logger) {
   }
 }
 
-module.exports = { fetchRenderedHtml };
+/**
+ * Try fetcher.fetchText() first. If the target site returns 403/401 (typical
+ * Cloudflare / WAF block on datacenter IPs), automatically retry with
+ * Playwright which launches a real Chromium and passes WAF checks.
+ */
+async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label }) {
+  try {
+    return { html: await fetcher.fetchText(url, { timeoutMs: config.requestTimeoutMs }), usedPlaywright: false };
+  } catch (error) {
+    if (/HTTP 40[13]/.test(error.message)) {
+      logger.warn(`[${label}] 页面被 WAF 拦截 (${error.message})，尝试 Playwright 渲染...`);
+      const rendered = await fetchRenderedHtml(url, config, logger);
+      if (rendered) {
+        logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
+        return { html: rendered, usedPlaywright: true };
+      }
+      throw new Error(`[${label}] 页面被 WAF 拦截且 Playwright 渲染也失败，无法获取数据。`);
+    }
+    throw error;
+  }
+}
+
+module.exports = { fetchRenderedHtml, fetchWithPlaywrightFallback };
