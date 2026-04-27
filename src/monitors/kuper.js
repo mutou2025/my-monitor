@@ -35,6 +35,20 @@ function statusForKuperBlock(text) {
   return normalized;
 }
 
+function statusForKuperPage(text) {
+  const value = normalizeWhitespace(text);
+
+  if (/(fully booked|sold\s*out|out\s+of\s+stock|no\s+dates?\s+available|no\s+places?\s+available|no\s+seats?\s+available|waitlist|closed|unavailable|已售罄|售罄|已满|满员|\bcomplet\b|\bcomplète\b|\bcomplets\b|completement|complètement)/i.test(value)) {
+    return 'full';
+  }
+
+  if (/(will\s+be\s+available|opens?\s+on|opening\s+on|registration\s+will\s+open|inscriptions?\s+ouvrir|new\s+dates?\s+will|not\s+yet\s+open|coming\s+soon|sera\s+disponible)/i.test(value)) {
+    return 'closed';
+  }
+
+  return 'unknown';
+}
+
 function parseKuperPage(html, site) {
   const $ = cheerio.load(html);
   const courses = [];
@@ -89,7 +103,7 @@ function parseKuperPage(html, site) {
       id: 'kuper-page-status',
       name: 'TCF Canada / TCFQ - Kuper Academy 页面状态',
       date: null,
-      status: normalizeStatus(bodyText),
+      status: statusForKuperPage(bodyText),
       rawStatus: bodyText.slice(0, 300),
       url: site.registrationUrl,
       source: 'kuper-page',

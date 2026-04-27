@@ -4,11 +4,41 @@ const {
   absoluteUrl,
   dedupeCourses,
   extractDates,
+  parseDateToIso,
   extractReleaseNotes,
   normalizeStatus,
   normalizeWhitespace,
   stableId
 } = require('../lib/parser-utils');
+
+function extractDatedStatusCourses(text, url) {
+  const value = normalizeWhitespace(text);
+  const courses = [];
+  const patterns = [
+    /\b(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)\s+\d{1,2},?\s+20\d{2}\b(?:\s*\([^)]*\))?/gi,
+    /\b20\d{2}[-/.]\d{1,2}[-/.]\d{1,2}\b(?:\s*\([^)]*\))?/g
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of value.matchAll(pattern)) {
+      const fragment = normalizeWhitespace(match[0]);
+      const date = parseDateToIso(fragment);
+      if (!date) continue;
+
+      courses.push({
+        id: `manitoba-date-${date}`,
+        name: 'TCF Canada',
+        date,
+        status: normalizeStatus(fragment),
+        rawStatus: fragment,
+        url,
+        source: 'html-date-list'
+      });
+    }
+  }
+
+  return courses;
+}
 
 function parseCourses(html, url) {
   const $ = cheerio.load(html);
@@ -49,6 +79,19 @@ function parseCourses(html, url) {
       source: 'html-button'
     });
   });
+
+  $('.s8-templates-card, section, article, div').each((_, element) => {
+    const blockText = normalizeWhitespace($(element).text());
+    if (!/tcf/i.test(blockText)) return;
+    if (!/next sessions|sold out|registration/i.test(blockText)) return;
+    if (blockText.length > 2000) return;
+
+    courses.push(...extractDatedStatusCourses(blockText, url));
+  });
+
+  if (courses.length === 0) {
+    courses.push(...extractDatedStatusCourses(bodyText, url));
+  }
 
   if (courses.length === 0 && /tcf/i.test(bodyText)) {
     courses.push({

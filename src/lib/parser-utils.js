@@ -118,7 +118,7 @@ function normalizeStatus(text) {
   const value = normalizeWhitespace(stripHtml(text)).toLowerCase();
   if (!value) return 'unknown';
 
-  if (/(fully booked|sold\s*out|out\s+of\s+stock|no\s+dates?\s+available|no\s+places?\s+available|no\s+seats?\s+available|waitlist|closed|unavailable|已售罄|售罄|已满|满员|complet|complete|complète|complets|completement|complètement)/i.test(value)) {
+  if (/(fully booked|sold\s*out|out\s+of\s+stock|no\s+dates?\s+available|no\s+places?\s+available|no\s+seats?\s+available|waitlist|closed|unavailable|已售罄|售罄|已满|满员|\bcomplet\b|\bcomplète\b|\bcomplets\b|completement|complètement)/i.test(value)) {
     return 'full';
   }
 

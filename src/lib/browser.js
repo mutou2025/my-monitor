@@ -1,5 +1,15 @@
 const { randomUserAgent } = require('./fetcher');
 
+function isCaptchaInterstitial(status, html) {
+  const body = String(html || '');
+  if (!body) return false;
+  return (
+    status === 202
+    || /\/\.well-known\/sgcaptcha\//i.test(body)
+    || /http-equiv=["']refresh["'][^>]*sgcaptcha/i.test(body)
+  );
+}
+
 /**
  * Fetch HTML via Playwright (headless Chromium).
  * Falls back gracefully if Playwright is not installed.
@@ -45,7 +55,22 @@ async function fetchRenderedHtml(url, config, logger) {
  */
 async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label }) {
   try {
-    return { html: await fetcher.fetchText(url, { timeoutMs: config.requestTimeoutMs }), usedPlaywright: false };
+    const response = await fetcher.request(url, {
+      timeoutMs: config.requestTimeoutMs,
+      responseType: 'text'
+    });
+
+    if (isCaptchaInterstitial(response.status, response.text)) {
+      logger.warn(`[${label}] 检测到验证码/反爬中间页 (HTTP ${response.status})，尝试 Playwright 渲染...`);
+      const rendered = await fetchRenderedHtml(url, config, logger);
+      if (rendered && !isCaptchaInterstitial(200, rendered)) {
+        logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
+        return { html: rendered, usedPlaywright: true };
+      }
+      throw new Error(`[${label}] 检测到 202/captcha 响应，且 Playwright 未获取到真实页面。`);
+    }
+
+    return { html: response.text, usedPlaywright: false };
   } catch (error) {
     if (/HTTP 40[13]/.test(error.message)) {
       logger.warn(`[${label}] 页面被 WAF 拦截 (${error.message})，尝试 Playwright 渲染...`);
