@@ -105,6 +105,22 @@ function loadConfig() {
         name: 'Manitoba - Alliance Francaise du Manitoba',
         url: stringEnv('MANITOBA_URL', 'https://www.afmanitoba.ca/en/exams/tcf/'),
         registrationUrl: stringEnv('MANITOBA_URL', 'https://www.afmanitoba.ca/en/exams/tcf/')
+      },
+      ottawa: {
+        key: 'ottawa',
+        name: 'Ottawa - Alliance Francaise Ottawa',
+        url: stringEnv('OTTAWA_URL', 'https://af.ca/ottawa/tests_et_examens/tcf-2/'),
+        registrationUrl: stringEnv('OTTAWA_REGISTRATION_URL', 'https://af.ca/ottawa/tests_et_examens/tcf-2/'),
+        apiUrl: stringEnv(
+          'OTTAWA_AEC_API_URL',
+          'https://afottawa.aec.app/api/v1/public/examinations/list/1/5|79?allBranches=NO'
+        ),
+        apiKey: stringEnv(
+          'OTTAWA_AEC_API_KEY',
+          'Y2QwOTc2YjhlNzU4MzcyNTMwMGI0NGUxMjY3MGQzNzY0NTdhZGI2NWQ0MjIxYjQ2NjcxYjRhZDZhZTY3ZDQ3NA=='
+        ),
+        targetDates: parseJsonEnv('OTTAWA_TARGET_DATES', []),
+        excludedDates: parseJsonEnv('OTTAWA_EXCLUDED_DATES', ['2026-07-02'])
       }
     }
   };

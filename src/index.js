@@ -12,6 +12,7 @@ const kuper = require('./monitors/kuper');
 const montreal = require('./monitors/montreal');
 const edmonton = require('./monitors/edmonton');
 const manitoba = require('./monitors/manitoba');
+const ottawa = require('./monitors/ottawa');
 
 const BACKOFF_DELAYS_MS = [60_000, 120_000, 300_000, 600_000];
 
@@ -156,7 +157,7 @@ async function main() {
 
   const notifier = createNotifier(config, logger, { dryRun });
   const context = { config, logger, fetcher, notifier, dryRun };
-  const monitors = [kuper, toronto, montreal, edmonton, manitoba];
+  const monitors = [kuper, toronto, montreal, edmonton, manitoba, ottawa];
 
   logger.info(`TCF Monitor 启动。监控 ${monitors.length} 个考点。`);
   if (dryRun) logger.info('当前是 dry-run 模式：会检查网站，但不会发送邮件或写入快照。');
