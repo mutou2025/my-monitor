@@ -181,7 +181,11 @@ function parseOfficialPage(html, site) {
 async function check({ config, fetcher, logger }) {
   const site = config.sites.toronto;
   const apiCourses = await fetchActiveApiCourses(site, fetcher, config, logger);
-  const { html } = await fetchWithPlaywrightFallback(site.url, { fetcher, config, logger, label: 'Toronto' });
+  const { html } = await fetchWithPlaywrightFallback(site.url, {
+    fetcher, config, logger, label: 'Toronto',
+    expectedPattern: /tcf|alliance fran[cç]aise|spadina/i,
+    preferPlaywright: site.preferPlaywright
+  });
 
   const pageCourses = parseOfficialPage(html, site);
   const text = normalizeWhitespace(cheerio.load(html)('body').text());

@@ -7,6 +7,12 @@ function isCaptchaInterstitial(status, html) {
     status === 202
     || /\/\.well-known\/sgcaptcha\//i.test(body)
     || /http-equiv=["']refresh["'][^>]*sgcaptcha/i.test(body)
+    // Cloudflare JS challenge / Turnstile / managed challenge
+    || /challenges\.cloudflare\.com/i.test(body)
+    || /cdn-cgi\/challenge-platform/i.test(body)
+    || (/just a moment/i.test(body) && /cloudflare/i.test(body))
+    // Very short body with meta-refresh (generic interstitial)
+    || (body.length < 4000 && /http-equiv=["']refresh["']/i.test(body) && !/tcf|alliance|exam/i.test(body))
   );
 }
 
@@ -52,8 +58,32 @@ async function fetchRenderedHtml(url, config, logger) {
  * Try fetcher.fetchText() first. If the target site returns 403/401 (typical
  * Cloudflare / WAF block on datacenter IPs), automatically retry with
  * Playwright which launches a real Chromium and passes WAF checks.
+ *
+ * Options:
+ *   - expectedPattern: RegExp to validate page content; triggers Playwright
+ *     fallback if the fetched HTML doesn't match (catches Cloudflare HTTP-200
+ *     JS challenges that isCaptchaInterstitial misses).
+ *   - preferPlaywright: if true, try Playwright first (for sites with
+ *     aggressive anti-bot that almost always block plain fetch on datacenter IPs).
  */
-async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label }) {
+async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label, expectedPattern, preferPlaywright }) {
+  // ── preferPlaywright: try Playwright first ──────────────────────────
+  if (preferPlaywright) {
+    logger.debug(`[${label}] preferPlaywright 已启用，优先使用 Playwright 渲染。`);
+    const rendered = await fetchRenderedHtml(url, config, logger);
+    if (rendered && !isCaptchaInterstitial(200, rendered)) {
+      const passesValidation = !expectedPattern || expectedPattern.test(rendered);
+      if (passesValidation) {
+        logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
+        return { html: rendered, usedPlaywright: true };
+      }
+      logger.warn(`[${label}] Playwright 渲染页面缺少预期关键词，降级为普通请求重试。`);
+    } else {
+      logger.warn(`[${label}] Playwright 渲染失败或遇到验证码，降级为普通请求重试。`);
+    }
+  }
+
+  // ── 普通 fetch（原有逻辑 + 内容验证增强）───────────────────────────
   try {
     const response = await fetcher.request(url, {
       timeoutMs: config.requestTimeoutMs,
@@ -68,6 +98,21 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
         return { html: rendered, usedPlaywright: true };
       }
       throw new Error(`[${label}] 检测到 202/captcha 响应，且 Playwright 未获取到真实页面。`);
+    }
+
+    // Content validation: page looks like a response but lacks expected keywords
+    // → probably a Cloudflare HTTP-200 JS challenge that slipped past isCaptchaInterstitial
+    if (expectedPattern && !expectedPattern.test(response.text)) {
+      logger.warn(`[${label}] 页面内容缺少预期关键词（疑似 HTTP 200 反爬页面），尝试 Playwright 渲染...`);
+      if (!preferPlaywright) {
+        // Only try Playwright here if we haven't already tried it above
+        const rendered = await fetchRenderedHtml(url, config, logger);
+        if (rendered && expectedPattern.test(rendered)) {
+          logger.info(`[${label}] Playwright 渲染成功，页面包含预期内容。`);
+          return { html: rendered, usedPlaywright: true };
+        }
+      }
+      logger.warn(`[${label}] Playwright 渲染后仍缺少预期关键词，使用原始响应继续。`);
     }
 
     return { html: response.text, usedPlaywright: false };

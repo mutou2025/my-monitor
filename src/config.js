@@ -72,7 +72,8 @@ function loadConfig() {
         activeApiUrl: stringEnv('TORONTO_ACTIVE_API_URL'),
         activeApiMethod: stringEnv('TORONTO_ACTIVE_API_METHOD', 'GET').toUpperCase(),
         activeApiBody: stringEnv('TORONTO_ACTIVE_API_BODY'),
-        activeApiHeaders: parseJsonEnv('TORONTO_ACTIVE_API_HEADERS', {})
+        activeApiHeaders: parseJsonEnv('TORONTO_ACTIVE_API_HEADERS', {}),
+        preferPlaywright: boolEnv('TORONTO_PREFER_PLAYWRIGHT', true)
       },
       kuper: {
         key: 'kuper',
