@@ -67,20 +67,21 @@ async function fetchRenderedHtml(url, config, logger) {
  *     aggressive anti-bot that almost always block plain fetch on datacenter IPs).
  */
 async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label, expectedPattern, preferPlaywright }) {
-  // ── preferPlaywright: try Playwright first ──────────────────────────
+  // ── preferPlaywright: 只用 Playwright，不走 fetch（服务器 IP 上 fetch 过不了 Cloudflare）
   if (preferPlaywright) {
-    logger.debug(`[${label}] preferPlaywright 已启用，优先使用 Playwright 渲染。`);
+    logger.debug(`[${label}] preferPlaywright 已启用，直接使用 Playwright 渲染。`);
     const rendered = await fetchRenderedHtml(url, config, logger);
-    if (rendered && !isCaptchaInterstitial(200, rendered)) {
-      const passesValidation = !expectedPattern || expectedPattern.test(rendered);
-      if (passesValidation) {
-        logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
-        return { html: rendered, usedPlaywright: true };
-      }
-      logger.warn(`[${label}] Playwright 渲染页面缺少预期关键词，降级为普通请求重试。`);
-    } else {
-      logger.warn(`[${label}] Playwright 渲染失败或遇到验证码，降级为普通请求重试。`);
+    if (!rendered) {
+      throw new Error(`[${label}] Playwright 渲染失败，无法获取页面。`);
     }
+    if (isCaptchaInterstitial(200, rendered)) {
+      throw new Error(`[${label}] Playwright 渲染后仍为验证码/反爬页面，无法获取真实内容。`);
+    }
+    if (expectedPattern && !expectedPattern.test(rendered)) {
+      throw new Error(`[${label}] Playwright 渲染成功但页面缺少预期关键词，疑似内容异常。`);
+    }
+    logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
+    return { html: rendered, usedPlaywright: true };
   }
 
   // ── 普通 fetch（原有逻辑 + 内容验证增强）───────────────────────────
