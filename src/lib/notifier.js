@@ -39,7 +39,7 @@ function siteNotificationFile(config, siteKey) {
 }
 
 function isAutoAddCartUrl(url) {
-  return /\/panier\/#\/addExamination\//i.test(String(url || ''));
+  return /\/panier(?:-dachat)?\/#\/addExamination\//i.test(String(url || ''));
 }
 
 function getEmailTargets(change) {
@@ -79,7 +79,7 @@ function buildHtml(change) {
   const cartWarning = targets.isAutoAddCart
     ? `
       <p style="font-size:14px;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;padding:12px 14px;border-radius:6px;margin:18px 0;">
-        Montreal 的直接报名链接会复用当前浏览器购物车。如果购物车里已有旧场次，请先清空购物车，或从报名页重新选择本邮件中的日期。
+        ⚠️ 直接加购链接可能因考位售罄而失效（购物车显示为空）。如果遇到这种情况，请通过上方报名页进入，查看是否还有其他可报名场次。如果购物车里已有旧场次，请先清空再加购新的。
       </p>
       <p style="font-size:14px;margin:12px 0;">
         直接加入购物车链接：<br>
@@ -123,7 +123,7 @@ function buildText(change) {
   if (targets.isAutoAddCart) {
     lines.push(
       '',
-      '注意：Montreal 的直接报名链接会复用当前浏览器购物车。如购物车里已有旧场次，请先清空购物车，或从报名页重新选择本邮件中的日期。',
+      '⚠️ 注意：直接加购链接可能因考位售罄而失效（购物车显示为空）。如遇此情况，请通过报名页查看是否还有其他可报名场次。如购物车里已有旧场次，请先清空再加购。',
       `直接加入购物车链接：${targets.directCartUrl}`
     );
   }
