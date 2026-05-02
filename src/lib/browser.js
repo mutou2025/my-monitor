@@ -1,32 +1,78 @@
-const { randomUserAgent } = require('./fetcher');
+const fs = require('fs');
+const path = require('path');
+const { randomUserAgent, USER_AGENTS } = require('./fetcher');
 
 /** Maximum time (ms) to wait inside a Queue-Fair virtual waiting room. */
 const QUEUE_FAIR_WAIT_MS = 90_000;
 /** Polling interval (ms) while waiting in the Queue-Fair queue. */
 const QUEUE_FAIR_POLL_MS = 2_000;
 
-/**
- * Error thrown when a Queue-Fair check is intentionally skipped
- * because the previous check already waited through the queue.
- * Callers should treat this as a benign skip, not a real failure.
- */
-class QueueFairSkipError extends Error {
-  constructor(label) {
-    super(`[${label}] 上次已排过 Queue-Fair，本轮跳过以节省资源。`);
-    this.name = 'QueueFairSkipError';
-  }
-}
-
-/**
- * Module-level state: URLs that encountered Queue-Fair on the last visit.
- * After one skip the flag is cleared, creating the pattern:
- *   check → queue(wait) → skip → check → queue(wait) → skip → ...
- */
-const _skipNextQueue = new Set();
-
 function isQueueFairPage(html) {
   const body = String(html || '');
   return /queue-fair/i.test(body) && /waiting\s*room|queue|your\s*(estimated\s*)?wait/i.test(body);
+}
+
+function stableUserAgent(label, url) {
+  const key = `${label}:${url}`;
+  let hash = 0;
+  for (let index = 0; index < key.length; index += 1) {
+    hash = (hash * 31 + key.charCodeAt(index)) >>> 0;
+  }
+  return USER_AGENTS[hash % USER_AGENTS.length] || randomUserAgent();
+}
+
+function safePathSegment(value) {
+  return String(value || 'playwright')
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'playwright';
+}
+
+function profileDirForUrl(url, config, label) {
+  let host = 'site';
+  try {
+    host = new URL(url).hostname;
+  } catch (_) {
+    host = safePathSegment(url);
+  }
+  const root = config.playwrightProfileDir
+    || path.join(config.projectRoot || process.cwd(), 'data', 'playwright-profiles');
+  return path.join(root, `${safePathSegment(label)}-${safePathSegment(host)}`);
+}
+
+async function newPageSession(chromium, url, config, logger, label) {
+  const pageOptions = {
+    userAgent: config.playwrightPersistSession ? stableUserAgent(label, url) : randomUserAgent(),
+    locale: 'fr-CA',
+    viewport: { width: 1440, height: 1100 }
+  };
+
+  if (config.playwrightPersistSession) {
+    const userDataDir = profileDirForUrl(url, config, label);
+    fs.mkdirSync(userDataDir, { recursive: true });
+    try {
+      const context = await chromium.launchPersistentContext(userDataDir, {
+        headless: true,
+        ...pageOptions
+      });
+      const page = context.pages()[0] || await context.newPage();
+      logger.debug(`[${label}] 使用持久化 Playwright 会话：${userDataDir}`);
+      return {
+        page,
+        close: () => context.close().catch(() => {})
+      };
+    } catch (error) {
+      logger.warn(`[${label}] 持久化 Playwright 会话启动失败，改用临时会话：${error.message}`);
+    }
+  }
+
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage(pageOptions);
+  return {
+    page,
+    close: () => browser.close().catch(() => {})
+  };
 }
 
 function isCaptchaInterstitial(status, html) {
@@ -81,12 +127,6 @@ async function waitForQueueFair(page, logger, label) {
  * Automatically detects and waits through Queue-Fair virtual waiting rooms.
  */
 async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
-  // ── Queue-Fair 跳过逻辑：上次排过队 → 本次直接跳过，不启动浏览器 ──
-  if (_skipNextQueue.has(url)) {
-    _skipNextQueue.delete(url);
-    throw new QueueFairSkipError(label);
-  }
-
   let chromium;
   try {
     ({ chromium } = require('playwright'));
@@ -95,14 +135,10 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
     return null;
   }
 
-  let browser;
+  let session;
   try {
-    browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage({
-      userAgent: randomUserAgent(),
-      locale: 'fr-CA',
-      viewport: { width: 1440, height: 1100 }
-    });
+    session = await newPageSession(chromium, url, config, logger, label);
+    const { page } = session;
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: config.playwrightTimeoutMs
@@ -117,9 +153,6 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
       const resolved = await waitForQueueFair(page, logger, label);
       if (resolved) {
         html = resolved;
-        // 标记：下一次调用直接跳过，节省一个排队周期
-        _skipNextQueue.add(url);
-        logger.debug(`[${label}] 已标记下次跳过 Queue-Fair。`);
       }
       // If waitForQueueFair returned null, html still contains the queue page
       // and the caller's isCaptchaInterstitial / expectedPattern checks will catch it
@@ -127,13 +160,11 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
 
     return html;
   } catch (error) {
-    // Let QueueFairSkipError propagate — it's a deliberate skip, not a failure
-    if (error instanceof QueueFairSkipError) throw error;
     logger.warn(`Playwright 渲染失败：${url} - ${error.message}`);
     return null;
   } finally {
-    if (browser) {
-      await browser.close().catch(() => {});
+    if (session) {
+      await session.close();
     }
   }
 }
@@ -215,4 +246,4 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
   }
 }
 
-module.exports = { QueueFairSkipError, fetchRenderedHtml, fetchWithPlaywrightFallback };
+module.exports = { fetchRenderedHtml, fetchWithPlaywrightFallback };

@@ -181,8 +181,12 @@ function parseOfficialPage(html, site) {
 async function check({ config, fetcher, logger }) {
   const site = config.sites.toronto;
   const apiCourses = await fetchActiveApiCourses(site, fetcher, config, logger);
+  const siteConfig = {
+    ...config,
+    playwrightTimeoutMs: site.playwrightTimeoutMs || config.playwrightTimeoutMs
+  };
   const { html } = await fetchWithPlaywrightFallback(site.url, {
-    fetcher, config, logger, label: 'Toronto',
+    fetcher, config: siteConfig, logger, label: 'Toronto',
     expectedPattern: /tcf|alliance fran[cç]aise|spadina/i,
     preferPlaywright: site.preferPlaywright
   });

@@ -6,7 +6,6 @@ const { createLogger } = require('./lib/logger');
 const { createNotifier } = require('./lib/notifier');
 const { updateSiteSnapshot } = require('./lib/snapshot');
 const { courseFingerprint, isAvailableStatus } = require('./lib/parser-utils');
-const { QueueFairSkipError } = require('./lib/browser');
 
 const toronto = require('./monitors/toronto');
 const kuper = require('./monitors/kuper');
@@ -127,14 +126,6 @@ async function runLoop(monitor, context, initialDelayMs) {
       logger.info(`[${monitor.name}] 下次检查：${describeDelay(delay)} 后`);
       await fetcher.sleep(delay);
     } catch (error) {
-      // Queue-Fair 跳过：上次已排过队，本轮主动跳过，不算失败
-      if (error instanceof QueueFairSkipError) {
-        logger.info(`[${monitor.name}] ${error.message}`);
-        const delay = fetcher.jitteredDelayMs(interval.base, interval.jitter);
-        logger.info(`[${monitor.name}] 下次检查：${describeDelay(delay)} 后`);
-        await fetcher.sleep(delay);
-        continue;
-      }
       const delay = fetcher.isRateLimitOrServerError(error)
         ? nextBackoffDelay(backoff)
         : fetcher.jitteredDelayMs(interval.base, interval.jitter);

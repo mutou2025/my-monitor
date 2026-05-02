@@ -5,6 +5,7 @@ node_modules/
 npm-debug.log*
 
 data/*.json
+data/playwright-profiles/
 !data/.gitkeep
 
 logs/*.log
