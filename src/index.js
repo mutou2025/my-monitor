@@ -6,6 +6,7 @@ const { createLogger } = require('./lib/logger');
 const { createNotifier } = require('./lib/notifier');
 const { updateSiteSnapshot } = require('./lib/snapshot');
 const { courseFingerprint, isAvailableStatus } = require('./lib/parser-utils');
+const { QueueFairSkipError } = require('./lib/browser');
 
 const toronto = require('./monitors/toronto');
 const kuper = require('./monitors/kuper');
@@ -91,9 +92,27 @@ async function runMonitorOnce(monitor, context) {
   return snapshotResult;
 }
 
+/**
+ * Resolve poll interval for a given monitor key.
+ * Each site can override global defaults via SITE_POLL_INTERVAL_BASE / _JITTER.
+ */
+function siteInterval(config, monitorKey) {
+  const siteKeys = Object.keys(config.sites);
+  const site = siteKeys.includes(monitorKey) ? config.sites[monitorKey] : null;
+  return {
+    base: (site && site.pollIntervalBaseSeconds) || config.pollIntervalBaseSeconds,
+    jitter: (site && site.pollIntervalJitterSeconds) || config.pollIntervalJitterSeconds
+  };
+}
+
 async function runLoop(monitor, context, initialDelayMs) {
   const { logger, config } = context;
   const backoff = { failures: 0 };
+  const interval = siteInterval(config, monitor.key);
+
+  logger.info(
+    `[${monitor.name}] 轮询间隔：${interval.base}±${interval.jitter} 秒`
+  );
 
   if (initialDelayMs > 0) {
     logger.info(`[${monitor.name}] 错峰启动，${describeDelay(initialDelayMs)} 后首次检查`);
@@ -104,13 +123,21 @@ async function runLoop(monitor, context, initialDelayMs) {
     try {
       await runMonitorOnce(monitor, context);
       resetBackoff(backoff);
-      const delay = fetcher.jitteredDelayMs(config.pollIntervalBaseSeconds, config.pollIntervalJitterSeconds);
+      const delay = fetcher.jitteredDelayMs(interval.base, interval.jitter);
       logger.info(`[${monitor.name}] 下次检查：${describeDelay(delay)} 后`);
       await fetcher.sleep(delay);
     } catch (error) {
+      // Queue-Fair 跳过：上次已排过队，本轮主动跳过，不算失败
+      if (error instanceof QueueFairSkipError) {
+        logger.info(`[${monitor.name}] ${error.message}`);
+        const delay = fetcher.jitteredDelayMs(interval.base, interval.jitter);
+        logger.info(`[${monitor.name}] 下次检查：${describeDelay(delay)} 后`);
+        await fetcher.sleep(delay);
+        continue;
+      }
       const delay = fetcher.isRateLimitOrServerError(error)
         ? nextBackoffDelay(backoff)
-        : fetcher.jitteredDelayMs(config.pollIntervalBaseSeconds, config.pollIntervalJitterSeconds);
+        : fetcher.jitteredDelayMs(interval.base, interval.jitter);
       logger.warn(`[${monitor.name}] 检查失败：${error.message}`);
       logger.warn(`[${monitor.name}] 下次重试：${describeDelay(delay)} 后`);
       await fetcher.sleep(delay);
@@ -179,8 +206,13 @@ async function main() {
 
   const staggerWindowMs = config.pollIntervalBaseSeconds * 1000;
   monitors.forEach((monitor, index) => {
-    const initialDelayMs = Math.round((staggerWindowMs / monitors.length) * index);
-    runLoop(monitor, context, initialDelayMs).catch((error) => {
+    const interval = siteInterval(config, monitor.key);
+    // Use the site's own interval for stagger, but cap initial delay to global interval
+    const staggerMs = Math.min(
+      Math.round((staggerWindowMs / monitors.length) * index),
+      interval.base * 1000
+    );
+    runLoop(monitor, context, staggerMs).catch((error) => {
       logger.error(`[${monitor.name}] 监控循环退出`, error);
     });
   });

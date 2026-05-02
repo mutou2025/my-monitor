@@ -36,6 +36,19 @@ function parseJsonEnv(name, fallback) {
   }
 }
 
+/**
+ * Read per-site poll interval overrides.
+ * Env format: {SITE_KEY}_POLL_INTERVAL_BASE / _JITTER (uppercase key).
+ * Falls back to the global pollInterval values.
+ */
+function sitePollInterval(siteKey, globalBase, globalJitter) {
+  const prefix = siteKey.toUpperCase();
+  return {
+    pollIntervalBaseSeconds: intEnv(`${prefix}_POLL_INTERVAL_BASE`, globalBase, 10),
+    pollIntervalJitterSeconds: intEnv(`${prefix}_POLL_INTERVAL_JITTER`, globalJitter, 0)
+  };
+}
+
 function loadConfig() {
   const pollIntervalBaseSeconds = intEnv('POLL_INTERVAL_BASE', 90, 10);
   const pollIntervalJitterSeconds = intEnv('POLL_INTERVAL_JITTER', 30, 0);
@@ -73,7 +86,8 @@ function loadConfig() {
         activeApiMethod: stringEnv('TORONTO_ACTIVE_API_METHOD', 'GET').toUpperCase(),
         activeApiBody: stringEnv('TORONTO_ACTIVE_API_BODY'),
         activeApiHeaders: parseJsonEnv('TORONTO_ACTIVE_API_HEADERS', {}),
-        preferPlaywright: boolEnv('TORONTO_PREFER_PLAYWRIGHT', true)
+        preferPlaywright: boolEnv('TORONTO_PREFER_PLAYWRIGHT', true),
+        ...sitePollInterval('toronto', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       kuper: {
         key: 'kuper',
@@ -87,25 +101,29 @@ function loadConfig() {
           'https://www.kuperacademy.ca/en/academics/tcf-canada-tcfq-language-proficiency-testing.html'
         ),
         campus: 'Kuper Academy, Kirkland',
-        address: '2975 Edmond, Kirkland, Quebec, H9H 5K5'
+        address: '2975 Edmond, Kirkland, Quebec, H9H 5K5',
+        ...sitePollInterval('kuper', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       montreal: {
         key: 'montreal',
         name: 'Montreal - Alliance Francaise de Montreal',
         url: stringEnv('MONTREAL_URL', 'https://www.afmontreal.ca/tcf/#/'),
-        registrationUrl: stringEnv('MONTREAL_URL', 'https://www.afmontreal.ca/tcf/#/')
+        registrationUrl: stringEnv('MONTREAL_URL', 'https://www.afmontreal.ca/tcf/#/'),
+        ...sitePollInterval('montreal', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       edmonton: {
         key: 'edmonton',
         name: 'Edmonton - Alliance Francaise Edmonton',
         url: stringEnv('EDMONTON_URL', 'https://www.afedmonton.com/en/exams/tcf/'),
-        registrationUrl: stringEnv('EDMONTON_URL', 'https://www.afedmonton.com/en/exams/tcf/')
+        registrationUrl: stringEnv('EDMONTON_URL', 'https://www.afedmonton.com/en/exams/tcf/'),
+        ...sitePollInterval('edmonton', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       manitoba: {
         key: 'manitoba',
         name: 'Manitoba - Alliance Francaise du Manitoba',
         url: stringEnv('MANITOBA_URL', 'https://www.afmanitoba.ca/en/exams/tcf/'),
-        registrationUrl: stringEnv('MANITOBA_URL', 'https://www.afmanitoba.ca/en/exams/tcf/')
+        registrationUrl: stringEnv('MANITOBA_URL', 'https://www.afmanitoba.ca/en/exams/tcf/'),
+        ...sitePollInterval('manitoba', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       ottawa: {
         key: 'ottawa',
@@ -121,7 +139,8 @@ function loadConfig() {
           'Y2QwOTc2YjhlNzU4MzcyNTMwMGI0NGUxMjY3MGQzNzY0NTdhZGI2NWQ0MjIxYjQ2NjcxYjRhZDZhZTY3ZDQ3NA=='
         ),
         targetDates: parseJsonEnv('OTTAWA_TARGET_DATES', []),
-        excludedDates: parseJsonEnv('OTTAWA_EXCLUDED_DATES', ['2026-07-02'])
+        excludedDates: parseJsonEnv('OTTAWA_EXCLUDED_DATES', ['2026-07-02']),
+        ...sitePollInterval('ottawa', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       }
     }
   };

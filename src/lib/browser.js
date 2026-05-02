@@ -1,5 +1,34 @@
 const { randomUserAgent } = require('./fetcher');
 
+/** Maximum time (ms) to wait inside a Queue-Fair virtual waiting room. */
+const QUEUE_FAIR_WAIT_MS = 90_000;
+/** Polling interval (ms) while waiting in the Queue-Fair queue. */
+const QUEUE_FAIR_POLL_MS = 2_000;
+
+/**
+ * Error thrown when a Queue-Fair check is intentionally skipped
+ * because the previous check already waited through the queue.
+ * Callers should treat this as a benign skip, not a real failure.
+ */
+class QueueFairSkipError extends Error {
+  constructor(label) {
+    super(`[${label}] 上次已排过 Queue-Fair，本轮跳过以节省资源。`);
+    this.name = 'QueueFairSkipError';
+  }
+}
+
+/**
+ * Module-level state: URLs that encountered Queue-Fair on the last visit.
+ * After one skip the flag is cleared, creating the pattern:
+ *   check → queue(wait) → skip → check → queue(wait) → skip → ...
+ */
+const _skipNextQueue = new Set();
+
+function isQueueFairPage(html) {
+  const body = String(html || '');
+  return /queue-fair/i.test(body) && /waiting\s*room|queue|your\s*(estimated\s*)?wait/i.test(body);
+}
+
 function isCaptchaInterstitial(status, html) {
   const body = String(html || '');
   if (!body) return false;
@@ -11,16 +40,53 @@ function isCaptchaInterstitial(status, html) {
     || /challenges\.cloudflare\.com/i.test(body)
     || /cdn-cgi\/challenge-platform/i.test(body)
     || (/just a moment/i.test(body) && /cloudflare/i.test(body))
+    // Queue-Fair virtual waiting room (HTTP 202 or JS-based redirect)
+    || isQueueFairPage(body)
     // Very short body with meta-refresh (generic interstitial)
     || (body.length < 4000 && /http-equiv=["']refresh["']/i.test(body) && !/tcf|alliance|exam/i.test(body))
   );
 }
 
 /**
+ * Wait for a Queue-Fair virtual waiting room to redirect to the real page.
+ * Queue-Fair uses JS polling to check queue position and redirects the browser
+ * once the visitor reaches the front (typically 10–60 seconds).
+ * Returns the final page HTML, or null if the queue never resolved.
+ */
+async function waitForQueueFair(page, logger, label) {
+  const deadline = Date.now() + QUEUE_FAIR_WAIT_MS;
+  logger.info(`[${label}] Queue-Fair 排队页面已检测到，等待排队完成（最多 ${QUEUE_FAIR_WAIT_MS / 1000} 秒）...`);
+
+  while (Date.now() < deadline) {
+    await page.waitForTimeout(QUEUE_FAIR_POLL_MS);
+    const html = await page.content();
+    if (!isQueueFairPage(html)) {
+      logger.info(`[${label}] Queue-Fair 排队完成，已加载真实页面。`);
+      // Give the real page a moment to fully render
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+      await page.waitForTimeout(2000);
+      return await page.content();
+    }
+    const remaining = Math.round((deadline - Date.now()) / 1000);
+    logger.debug(`[${label}] 仍在 Queue-Fair 排队中，剩余等待 ${remaining} 秒...`);
+  }
+
+  logger.warn(`[${label}] Queue-Fair 排队超时（${QUEUE_FAIR_WAIT_MS / 1000} 秒），未能通过排队。`);
+  return null;
+}
+
+/**
  * Fetch HTML via Playwright (headless Chromium).
  * Falls back gracefully if Playwright is not installed.
+ * Automatically detects and waits through Queue-Fair virtual waiting rooms.
  */
-async function fetchRenderedHtml(url, config, logger) {
+async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
+  // ── Queue-Fair 跳过逻辑：上次排过队 → 本次直接跳过，不启动浏览器 ──
+  if (_skipNextQueue.has(url)) {
+    _skipNextQueue.delete(url);
+    throw new QueueFairSkipError(label);
+  }
+
   let chromium;
   try {
     ({ chromium } = require('playwright'));
@@ -43,8 +109,26 @@ async function fetchRenderedHtml(url, config, logger) {
     });
     await page.waitForLoadState('networkidle', { timeout: 10000 }).catch(() => {});
     await page.waitForTimeout(3000);
-    return await page.content();
+
+    let html = await page.content();
+
+    // Detect Queue-Fair and wait through the queue
+    if (isQueueFairPage(html)) {
+      const resolved = await waitForQueueFair(page, logger, label);
+      if (resolved) {
+        html = resolved;
+        // 标记：下一次调用直接跳过，节省一个排队周期
+        _skipNextQueue.add(url);
+        logger.debug(`[${label}] 已标记下次跳过 Queue-Fair。`);
+      }
+      // If waitForQueueFair returned null, html still contains the queue page
+      // and the caller's isCaptchaInterstitial / expectedPattern checks will catch it
+    }
+
+    return html;
   } catch (error) {
+    // Let QueueFairSkipError propagate — it's a deliberate skip, not a failure
+    if (error instanceof QueueFairSkipError) throw error;
     logger.warn(`Playwright 渲染失败：${url} - ${error.message}`);
     return null;
   } finally {
@@ -70,7 +154,7 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
   // ── preferPlaywright: 只用 Playwright，不走 fetch（服务器 IP 上 fetch 过不了 Cloudflare）
   if (preferPlaywright) {
     logger.debug(`[${label}] preferPlaywright 已启用，直接使用 Playwright 渲染。`);
-    const rendered = await fetchRenderedHtml(url, config, logger);
+    const rendered = await fetchRenderedHtml(url, config, logger, label);
     if (!rendered) {
       throw new Error(`[${label}] Playwright 渲染失败，无法获取页面。`);
     }
@@ -93,7 +177,7 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
 
     if (isCaptchaInterstitial(response.status, response.text)) {
       logger.warn(`[${label}] 检测到验证码/反爬中间页 (HTTP ${response.status})，尝试 Playwright 渲染...`);
-      const rendered = await fetchRenderedHtml(url, config, logger);
+      const rendered = await fetchRenderedHtml(url, config, logger, label);
       if (rendered && !isCaptchaInterstitial(200, rendered)) {
         logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
         return { html: rendered, usedPlaywright: true };
@@ -107,7 +191,7 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
       logger.warn(`[${label}] 页面内容缺少预期关键词（疑似 HTTP 200 反爬页面），尝试 Playwright 渲染...`);
       if (!preferPlaywright) {
         // Only try Playwright here if we haven't already tried it above
-        const rendered = await fetchRenderedHtml(url, config, logger);
+        const rendered = await fetchRenderedHtml(url, config, logger, label);
         if (rendered && expectedPattern.test(rendered)) {
           logger.info(`[${label}] Playwright 渲染成功，页面包含预期内容。`);
           return { html: rendered, usedPlaywright: true };
@@ -120,7 +204,7 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
   } catch (error) {
     if (/HTTP 40[13]/.test(error.message)) {
       logger.warn(`[${label}] 页面被 WAF 拦截 (${error.message})，尝试 Playwright 渲染...`);
-      const rendered = await fetchRenderedHtml(url, config, logger);
+      const rendered = await fetchRenderedHtml(url, config, logger, label);
       if (rendered) {
         logger.info(`[${label}] Playwright 渲染成功，继续解析。`);
         return { html: rendered, usedPlaywright: true };
@@ -131,4 +215,4 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
   }
 }
 
-module.exports = { fetchRenderedHtml, fetchWithPlaywrightFallback };
+module.exports = { QueueFairSkipError, fetchRenderedHtml, fetchWithPlaywrightFallback };
