@@ -183,7 +183,8 @@ async function check({ config, fetcher, logger }) {
   const apiCourses = await fetchActiveApiCourses(site, fetcher, config, logger);
   const siteConfig = {
     ...config,
-    playwrightTimeoutMs: site.playwrightTimeoutMs || config.playwrightTimeoutMs
+    playwrightTimeoutMs: site.playwrightTimeoutMs || config.playwrightTimeoutMs,
+    queueFairWaitMs: site.queueFairWaitMs || config.queueFairWaitMs
   };
   const { html } = await fetchWithPlaywrightFallback(site.url, {
     fetcher, config: siteConfig, logger, label: 'Toronto',

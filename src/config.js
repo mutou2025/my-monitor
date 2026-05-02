@@ -63,6 +63,7 @@ function loadConfig() {
     pollIntervalJitterSeconds,
     requestTimeoutMs: 15000,
     playwrightTimeoutMs: intEnv('PLAYWRIGHT_TIMEOUT_MS', 30000, 15000),
+    queueFairWaitMs: intEnv('QUEUE_FAIR_WAIT_MS', 180000, 30000),
     playwrightPersistSession: boolEnv('PLAYWRIGHT_PERSIST_SESSION', true),
     playwrightProfileDir: stringEnv(
       'PLAYWRIGHT_PROFILE_DIR',
@@ -93,6 +94,7 @@ function loadConfig() {
         activeApiHeaders: parseJsonEnv('TORONTO_ACTIVE_API_HEADERS', {}),
         preferPlaywright: boolEnv('TORONTO_PREFER_PLAYWRIGHT', true),
         playwrightTimeoutMs: intEnv('TORONTO_PLAYWRIGHT_TIMEOUT_MS', 120000, 15000),
+        queueFairWaitMs: intEnv('TORONTO_QUEUE_FAIR_WAIT_MS', 180000, 30000),
         ...sitePollInterval('toronto', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       kuper: {

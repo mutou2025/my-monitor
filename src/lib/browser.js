@@ -2,8 +2,6 @@ const fs = require('fs');
 const path = require('path');
 const { randomUserAgent, USER_AGENTS } = require('./fetcher');
 
-/** Maximum time (ms) to wait inside a Queue-Fair virtual waiting room. */
-const QUEUE_FAIR_WAIT_MS = 90_000;
 /** Polling interval (ms) while waiting in the Queue-Fair queue. */
 const QUEUE_FAIR_POLL_MS = 2_000;
 
@@ -99,9 +97,10 @@ function isCaptchaInterstitial(status, html) {
  * once the visitor reaches the front (typically 10–60 seconds).
  * Returns the final page HTML, or null if the queue never resolved.
  */
-async function waitForQueueFair(page, logger, label) {
-  const deadline = Date.now() + QUEUE_FAIR_WAIT_MS;
-  logger.info(`[${label}] Queue-Fair 排队页面已检测到，等待排队完成（最多 ${QUEUE_FAIR_WAIT_MS / 1000} 秒）...`);
+async function waitForQueueFair(page, logger, label, waitMs) {
+  const deadline = Date.now() + waitMs;
+  const waitSeconds = Math.round(waitMs / 1000);
+  logger.info(`[${label}] Queue-Fair 排队页面已检测到，等待排队完成（最多 ${waitSeconds} 秒）...`);
 
   while (Date.now() < deadline) {
     await page.waitForTimeout(QUEUE_FAIR_POLL_MS);
@@ -117,7 +116,7 @@ async function waitForQueueFair(page, logger, label) {
     logger.debug(`[${label}] 仍在 Queue-Fair 排队中，剩余等待 ${remaining} 秒...`);
   }
 
-  logger.warn(`[${label}] Queue-Fair 排队超时（${QUEUE_FAIR_WAIT_MS / 1000} 秒），未能通过排队。`);
+  logger.warn(`[${label}] Queue-Fair 排队超时（${waitSeconds} 秒），本轮未能通过排队。持久化会话会保留，下轮继续尝试。`);
   return null;
 }
 
@@ -150,7 +149,8 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
 
     // Detect Queue-Fair and wait through the queue
     if (isQueueFairPage(html)) {
-      const resolved = await waitForQueueFair(page, logger, label);
+      const queueFairWaitMs = config.queueFairWaitMs || 90_000;
+      const resolved = await waitForQueueFair(page, logger, label, queueFairWaitMs);
       if (resolved) {
         html = resolved;
       }

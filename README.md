@@ -74,6 +74,7 @@ RECIPIENT_EMAIL=收件人邮箱@example.com
 - `PLAYWRIGHT_TIMEOUT_MS=30000`：动态页面最多等 30 秒，Montreal 页面比较慢时会用到。
 - `PLAYWRIGHT_PERSIST_SESSION=true`：保留浏览器会话/cookie，减少 Toronto Queue-Fair 重复排队。
 - `TORONTO_PLAYWRIGHT_TIMEOUT_MS=120000`：Toronto 单独给 120 秒页面超时，避免排队/跳转慢时过早失败。
+- `TORONTO_QUEUE_FAIR_WAIT_MS=180000`：Toronto Queue-Fair 最多等 180 秒，避免 90 秒刚到就断开排队。
 
 ## 3. Gmail 应用专用密码
 
@@ -177,6 +178,7 @@ PLAYWRIGHT_MODE=auto
 PLAYWRIGHT_TIMEOUT_MS=30000
 PLAYWRIGHT_PERSIST_SESSION=true
 TORONTO_PLAYWRIGHT_TIMEOUT_MS=120000
+TORONTO_QUEUE_FAIR_WAIT_MS=180000
 LOG_LEVEL=info
 NOTIFY_ON_FIRST_RUN=false
 ```
@@ -410,7 +412,7 @@ launchctl unload ~/Library/LaunchAgents/com.example.tcf-monitor.plist
 - 页面：<https://www.alliance-francaise.ca/en/exams/tests/informations-about-tcf-canada/tcf-canada>
 - 地址：24 Spadina Road, Toronto, ON
 - 监控逻辑：默认只监控官方 TCF 页面，不再依赖 `TORONTO_REGISTER_URL`。
-- 抢位建议：`TORONTO_POLL_INTERVAL_BASE=60`、`TORONTO_POLL_INTERVAL_JITTER=20`，并保持 `PLAYWRIGHT_PERSIST_SESSION=true`。程序会复用 Playwright profile/cookie，尽量减少每轮都重新进入 Queue-Fair。
+- 抢位建议：`TORONTO_POLL_INTERVAL_BASE=60`、`TORONTO_POLL_INTERVAL_JITTER=20`，并保持 `PLAYWRIGHT_PERSIST_SESSION=true`、`TORONTO_QUEUE_FAIR_WAIT_MS=180000`。程序会复用 Playwright profile/cookie，尽量减少每轮都重新进入 Queue-Fair；遇到排队时会多等一会儿，不在 90 秒时提前断开。
 
 如果需要直接抓 Active Network API，可以在 `.env` 里额外填：
 
