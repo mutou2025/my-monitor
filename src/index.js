@@ -84,7 +84,29 @@ async function runMonitorOnce(monitor, context) {
     logger.info(`[${result.siteName}] 页面提示：${result.notes.join(' | ')}`);
   }
 
-  for (const change of snapshotResult.changes) {
+  // Apply per-site alertKeywords filter: when configured, only notify for courses
+  // whose text (name, description, rawStatus, id) matches at least one keyword.
+  const siteConfig = config.sites[result.siteKey];
+  const alertKeywords = (siteConfig && siteConfig.alertKeywords) || [];
+  const filteredChanges = alertKeywords.length > 0
+    ? snapshotResult.changes.filter((change) => {
+        const haystack = [
+          change.course.name,
+          change.course.description,
+          change.course.rawStatus,
+          change.course.id
+        ].join(' ').toLowerCase();
+        return alertKeywords.some((kw) => haystack.includes(kw));
+      })
+    : snapshotResult.changes;
+
+  if (alertKeywords.length > 0 && filteredChanges.length < snapshotResult.changes.length) {
+    logger.info(
+      `[${result.siteName}] alertKeywords 过滤：${snapshotResult.changes.length} 条变化中 ${snapshotResult.changes.length - filteredChanges.length} 条被过滤（不含关键词：${alertKeywords.join(', ')}）`
+    );
+  }
+
+  for (const change of filteredChanges) {
     await notifier.notifyChange(change);
   }
 

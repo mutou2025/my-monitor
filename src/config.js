@@ -49,6 +49,17 @@ function sitePollInterval(siteKey, globalBase, globalJitter) {
   };
 }
 
+/**
+ * Parse comma-separated alert keywords from env.
+ * When set, only courses matching at least one keyword will trigger notifications.
+ * The monitor still scrapes all courses (snapshots are unaffected).
+ */
+function parseAlertKeywords(siteKey) {
+  const raw = stringEnv(`${siteKey.toUpperCase()}_ALERT_KEYWORDS`);
+  if (!raw) return [];
+  return raw.split(',').map((k) => k.trim().toLowerCase()).filter(Boolean);
+}
+
 function loadConfig() {
   const pollIntervalBaseSeconds = intEnv('POLL_INTERVAL_BASE', 90, 10);
   const pollIntervalJitterSeconds = intEnv('POLL_INTERVAL_JITTER', 30, 0);
@@ -117,6 +128,7 @@ function loadConfig() {
         name: 'Montreal - Alliance Francaise de Montreal',
         url: stringEnv('MONTREAL_URL', 'https://www.afmontreal.ca/tcf/#/'),
         registrationUrl: stringEnv('MONTREAL_URL', 'https://www.afmontreal.ca/tcf/#/'),
+        alertKeywords: parseAlertKeywords('montreal'),
         ...sitePollInterval('montreal', pollIntervalBaseSeconds, pollIntervalJitterSeconds)
       },
       edmonton: {
