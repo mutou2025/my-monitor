@@ -189,7 +189,8 @@ async function check({ config, fetcher, logger }) {
   const { html } = await fetchWithPlaywrightFallback(site.url, {
     fetcher, config: siteConfig, logger, label: 'Toronto',
     expectedPattern: /tcf|alliance fran[cç]aise|spadina/i,
-    preferPlaywright: site.preferPlaywright
+    preferPlaywright: site.preferPlaywright,
+    keepAlive: site.preferPlaywright
   });
 
   const pageCourses = parseOfficialPage(html, site);

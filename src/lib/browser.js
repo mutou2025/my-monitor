@@ -5,6 +5,14 @@ const { randomUserAgent, USER_AGENTS } = require('./fetcher');
 /** Polling interval (ms) while waiting in the Queue-Fair queue. */
 const QUEUE_FAIR_POLL_MS = 2_000;
 
+/**
+ * Module-level session cache.
+ * Keeps Playwright browser instances alive between monitor checks so that
+ * Queue-Fair pass cookies and session state persist across polling cycles.
+ * Key: `${label}:${url}`, Value: { page, close }
+ */
+const activeSessions = new Map();
+
 function isQueueFairPage(html) {
   const body = String(html || '');
   return /queue-fair/i.test(body) && /waiting\s*room|queue|your\s*(estimated\s*)?wait/i.test(body);
@@ -121,11 +129,57 @@ async function waitForQueueFair(page, logger, label, waitMs) {
 }
 
 /**
+ * Check whether a cached browser session is still alive and usable.
+ */
+async function isSessionAlive(session) {
+  try {
+    await session.page.evaluate(() => document.readyState);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Get an existing cached session or create a new one.
+ * When keepAlive is true, the session is stored in the module-level cache
+ * and reused across polling cycles. This preserves Queue-Fair cookies and
+ * avoids re-queuing on every check.
+ */
+async function getOrCreateSession(chromium, url, config, logger, label, keepAlive) {
+  const cacheKey = `${label}:${url}`;
+
+  if (keepAlive && activeSessions.has(cacheKey)) {
+    const cached = activeSessions.get(cacheKey);
+    if (await isSessionAlive(cached)) {
+      logger.debug(`[${label}] 复用常驻 Playwright 会话（跳过排队）。`);
+      return { session: cached, isReused: true };
+    }
+    // Session is dead, clean up
+    logger.debug(`[${label}] 缓存的 Playwright 会话已失效，重新创建。`);
+    try { await cached.close(); } catch {}
+    activeSessions.delete(cacheKey);
+  }
+
+  const session = await newPageSession(chromium, url, config, logger, label);
+  if (keepAlive) {
+    activeSessions.set(cacheKey, session);
+    logger.info(`[${label}] 已创建常驻 Playwright 会话（浏览器将在两次检查之间保持运行）。`);
+  }
+  return { session, isReused: false };
+}
+
+/**
  * Fetch HTML via Playwright (headless Chromium).
  * Falls back gracefully if Playwright is not installed.
  * Automatically detects and waits through Queue-Fair virtual waiting rooms.
+ *
+ * When keepAlive is true, the browser session is cached and reused across
+ * polling cycles. This is critical for sites with Queue-Fair: once the
+ * browser passes through the queue, subsequent checks reuse the same
+ * session and skip the queue entirely.
  */
-async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
+async function fetchRenderedHtml(url, config, logger, label = 'Playwright', keepAlive = false) {
   let chromium;
   try {
     ({ chromium } = require('playwright'));
@@ -134,10 +188,12 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
     return null;
   }
 
-  let session;
+  let sessionInfo;
   try {
-    session = await newPageSession(chromium, url, config, logger, label);
+    sessionInfo = await getOrCreateSession(chromium, url, config, logger, label, keepAlive);
+    const { session, isReused } = sessionInfo;
     const { page } = session;
+
     await page.goto(url, {
       waitUntil: 'domcontentloaded',
       timeout: config.playwrightTimeoutMs
@@ -149,6 +205,9 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
 
     // Detect Queue-Fair and wait through the queue
     if (isQueueFairPage(html)) {
+      if (isReused) {
+        logger.info(`[${label}] 常驻会话重新进入 Queue-Fair 排队（可能 cookie 已过期）。`);
+      }
       const queueFairWaitMs = config.queueFairWaitMs || 90_000;
       const resolved = await waitForQueueFair(page, logger, label, queueFairWaitMs);
       if (resolved) {
@@ -161,10 +220,18 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
     return html;
   } catch (error) {
     logger.warn(`Playwright 渲染失败：${url} - ${error.message}`);
+    // On error, invalidate the cached session to avoid reusing a broken one
+    if (keepAlive && sessionInfo) {
+      const cacheKey = `${label}:${url}`;
+      activeSessions.delete(cacheKey);
+      try { await sessionInfo.session.close(); } catch {}
+      logger.debug(`[${label}] 渲染失败，已清除缓存的会话。`);
+    }
     return null;
   } finally {
-    if (session) {
-      await session.close();
+    // Only close the session if NOT keeping it alive
+    if (!keepAlive && sessionInfo) {
+      await sessionInfo.session.close();
     }
   }
 }
@@ -180,12 +247,14 @@ async function fetchRenderedHtml(url, config, logger, label = 'Playwright') {
  *     JS challenges that isCaptchaInterstitial misses).
  *   - preferPlaywright: if true, try Playwright first (for sites with
  *     aggressive anti-bot that almost always block plain fetch on datacenter IPs).
+ *   - keepAlive: if true, keep Playwright browser session alive between checks
+ *     to preserve Queue-Fair cookies and avoid re-queuing.
  */
-async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label, expectedPattern, preferPlaywright }) {
+async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label, expectedPattern, preferPlaywright, keepAlive }) {
   // ── preferPlaywright: 只用 Playwright，不走 fetch（服务器 IP 上 fetch 过不了 Cloudflare）
   if (preferPlaywright) {
     logger.debug(`[${label}] preferPlaywright 已启用，直接使用 Playwright 渲染。`);
-    const rendered = await fetchRenderedHtml(url, config, logger, label);
+    const rendered = await fetchRenderedHtml(url, config, logger, label, keepAlive);
     if (!rendered) {
       throw new Error(`[${label}] Playwright 渲染失败，无法获取页面。`);
     }
@@ -246,4 +315,16 @@ async function fetchWithPlaywrightFallback(url, { fetcher, config, logger, label
   }
 }
 
-module.exports = { fetchRenderedHtml, fetchWithPlaywrightFallback };
+/**
+ * Close all cached browser sessions. Should be called on process shutdown.
+ */
+async function closeAllSessions(logger) {
+  if (activeSessions.size === 0) return;
+  if (logger) logger.info(`关闭 ${activeSessions.size} 个常驻 Playwright 会话...`);
+  for (const [key, session] of activeSessions) {
+    try { await session.close(); } catch {}
+  }
+  activeSessions.clear();
+}
+
+module.exports = { fetchRenderedHtml, fetchWithPlaywrightFallback, closeAllSessions };

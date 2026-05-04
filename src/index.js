@@ -5,6 +5,7 @@ const fetcher = require('./lib/fetcher');
 const { createLogger } = require('./lib/logger');
 const { createNotifier } = require('./lib/notifier');
 const { updateSiteSnapshot } = require('./lib/snapshot');
+const { closeAllSessions } = require('./lib/browser');
 const { courseFingerprint, isAvailableStatus } = require('./lib/parser-utils');
 
 const toronto = require('./monitors/toronto');
@@ -173,18 +174,20 @@ async function main() {
   process.on('unhandledRejection', (error) => {
     logger.error('未处理的异步错误', error);
   });
-  process.on('uncaughtException', (error) => {
+  process.on('uncaughtException', async (error) => {
     logger.error('未捕获的运行错误', error);
+    await closeAllSessions(logger);
     logger.close();
     process.exit(1);
   });
 
   let shuttingDown = false;
   for (const signal of ['SIGTERM', 'SIGINT']) {
-    process.on(signal, () => {
+    process.on(signal, async () => {
       if (shuttingDown) return;
       shuttingDown = true;
       logger.info(`收到 ${signal}，正在关闭...`);
+      await closeAllSessions(logger);
       logger.close();
       process.exit(0);
     });
